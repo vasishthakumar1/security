@@ -4,6 +4,12 @@
 
 This workshop introduces Oracle Privilege Analysis on Oracle Autonomous Database. It gives you an opportunity to capture privilege usage during a workload, generate Privilege Analysis results, and review used and unused privileges so you can identify grants that may no longer be needed.
 
+Your organization is modernizing applications and moving more workloads to Autonomous Database. As more users, services, and applications are granted access to data, it becomes harder to know whether those privileges are still required. This challenge applies to both local databases and cloud databases. Over time, accounts often accumulate privileges they no longer use, increasing the risk if an account is misused or compromised.
+
+As a security professional, you understand the value of least privilege, zero trust, and continuous validation. Oracle Privilege Analysis helps you compare privileges that were granted with privileges that were actually used during a workload. This allows you to identify unnecessary access, reduce privilege sprawl, and make better decisions before revoking privileges.
+
+In this lab, you will capture activity from sample application users, generate Privilege Analysis results, and review which object privileges were used or unused. By the end, you will understand how Privilege Analysis can support least privilege reviews for applications running on Autonomous Database, while applying the same least privilege principles used for local database environments.
+
 *Estimated Lab Time:* 20 minutes
 
 *Version tested in this lab:* Oracle Autonomous Database 26ai
