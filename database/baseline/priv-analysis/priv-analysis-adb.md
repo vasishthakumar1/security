@@ -4,11 +4,13 @@
 
 This workshop introduces Oracle Privilege Analysis on Oracle Autonomous Database. It gives you an opportunity to capture privilege usage during a workload, generate Privilege Analysis results, and review used and unused privileges so you can identify grants that may no longer be needed.
 
-Your organization is modernizing applications and moving more workloads to Autonomous Database. As more users, services, and applications are granted access to data, it becomes harder to know whether those privileges are still required. This challenge applies to both local databases and cloud databases. Over time, accounts often accumulate privileges they no longer use, increasing the risk if an account is misused or compromised.
+Data breaches, credential misuse, and compromised privileged accounts continue to be major security risks for organizations. When an account has more privileges than it needs, misuse of that account can expose more data, affect more applications, and increase the overall blast radius of an incident.
 
-As a security professional, you understand the value of least privilege, zero trust, and continuous validation. Oracle Privilege Analysis helps you compare privileges that were granted with privileges that were actually used during a workload. This allows you to identify unnecessary access, reduce privilege sprawl, and make better decisions before revoking privileges.
+As a security professional, you need to understand which privileges are actually being used and which privileges have simply accumulated over time. This is important across database environments, including local databases, self-managed databases, and cloud databases.
 
-In this lab, you will capture activity from sample application users, generate Privilege Analysis results, and review which object privileges were used or unused. By the end, you will understand how Privilege Analysis can support least privilege reviews for applications running on Autonomous Database, while applying the same least privilege principles used for local database environments.
+Oracle Privilege Analysis helps you compare privileges that were granted with privileges that were actually used during a workload. This allows you to identify unnecessary access, reduce privilege sprawl, and make better decisions before revoking privileges.
+
+In this lab, you will use Autonomous Database as the lab environment to capture activity from sample application users, generate Privilege Analysis results, and review which object privileges were used or unused. The same least privilege review approach applies to other Oracle Database environments as well.
 
 *Estimated Lab Time:* 20 minutes
 
@@ -62,9 +64,8 @@ This lab assumes you have:
     -- Create application users.
     CREATE USER app_read IDENTIFIED BY WElcome_123#;
     CREATE USER app_write IDENTIFIED BY WElcome_123#;
-    CREATE USER app_admin IDENTIFIED BY WElcome_123#;
 
-    GRANT CREATE SESSION TO app_read, app_write, app_admin;
+    GRANT CREATE SESSION TO app_read, app_write;
 
     -- Create the Privilege Analysis administrator.
     CREATE USER pa_admin IDENTIFIED BY WElcome_123#;
@@ -92,13 +93,6 @@ This lab assumes you have:
           p_schema => UPPER('app_write'),
           p_url_mapping_type => 'BASE_PATH',
           p_url_mapping_pattern => LOWER('app_write'),
-          p_auto_rest_auth => TRUE);
-
-       ORDS_ADMIN.ENABLE_SCHEMA(
-          p_enabled => TRUE,
-          p_schema => UPPER('app_admin'),
-          p_url_mapping_type => 'BASE_PATH',
-          p_url_mapping_pattern => LOWER('app_admin'),
           p_auto_rest_auth => TRUE);
 
        ORDS_ADMIN.ENABLE_SCHEMA(
@@ -142,28 +136,31 @@ This lab assumes you have:
 
 6. Grant privileges to the application users.
 
-    These grants intentionally include privileges that will not be used during the workload. This helps Privilege Analysis show both used and unused privileges.
+    These grants intentionally include privileges that will not be used during the workload.
 
     ```
     <copy>
-    -- app_read can query employees and departments.
+    -- app_read can query employees.
     GRANT SELECT ON hr_owner.employees TO app_read;
-    GRANT SELECT ON hr_owner.departments TO app_read;
 
     -- Extra unused privilege for app_read.
-    GRANT DELETE ON hr_owner.departments TO app_read;
+    GRANT SELECT ON hr_owner.departments TO app_read;
 
     -- app_write can query, insert, and update employees.
     GRANT SELECT, INSERT, UPDATE ON hr_owner.employees TO app_write;
 
-    -- app_admin can query, insert, update, and delete employees,
-    -- and can query departments.
-    GRANT SELECT, INSERT, UPDATE, DELETE ON hr_owner.employees TO app_admin;
-    GRANT SELECT ON hr_owner.departments TO app_admin;
+    -- Extra unused privilege for app_write.
+    GRANT DELETE ON hr_owner.employees TO app_write;
     </copy>
     ```
 
 ## Task 2: Capture the workload to analyze
+
+Before creating a privilege capture, identify the workload you want to analyze. In a real environment, enable the capture shortly before the representative workload starts, such as during a normal business workflow, functional testing, or another planned activity window. Let the capture run long enough to observe the expected application activity.
+
+For production systems, choose the capture window carefully. A capture that runs for only a few minutes may miss important application paths, while a capture that runs during an unusual workload may produce misleading results. Start with a well-defined workload window, review the results with the application owner, and use the findings to make incremental privilege improvements. Repeat the capture as needed instead of waiting for a perfect one-time analysis or taking no action.
+
+In this lab, you will create a context-based capture that is scoped to the sample application users, `APP_READ` and `APP_WRITE`. This avoids capturing unrelated database activity and demonstrates a more focused approach than enabling privilege capture across the entire database.
 
 1. Connect as `pa_admin`.
 
@@ -173,9 +170,10 @@ This lab assumes you have:
     <copy>
     BEGIN
        DBMS_PRIVILEGE_CAPTURE.CREATE_CAPTURE(
-          name        => 'All Database Capture',
-          description => 'Capture all privilege usage',
-          type        => DBMS_PRIVILEGE_CAPTURE.G_DATABASE
+          name        => 'Application User Capture',
+          description => 'Capture privilege usage for application users',
+          type        => DBMS_PRIVILEGE_CAPTURE.G_CONTEXT,
+          condition   => 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') IN (''APP_READ'', ''APP_WRITE'')'
        );
     END;
     /
@@ -188,7 +186,7 @@ This lab assumes you have:
     <copy>
     BEGIN
        DBMS_PRIVILEGE_CAPTURE.ENABLE_CAPTURE(
-          name => 'All Database Capture'
+          name => 'Application User Capture'
        );
     END;
     /
@@ -201,7 +199,7 @@ This lab assumes you have:
     <copy>
     SELECT name, type, enabled
     FROM dba_priv_captures
-    WHERE name = 'All Database Capture';
+    WHERE name = 'Application User Capture';
     </copy>
     ```
 
@@ -213,7 +211,7 @@ This lab assumes you have:
 
 ## Task 3: Generate workload
 
-1. Connect as `app_read`, and then query the application tables.
+1. Connect as `app_read`, and then query employee data.
 
     ```
     <copy>
@@ -222,7 +220,7 @@ This lab assumes you have:
     </copy>
     ```
 
-    **Note:** The `DELETE` privilege granted to `app_read` is not used in this workload, so it should appear as unused after results are generated.
+    **Note:** The `app_read` user is also granted `SELECT` on `hr_owner.departments`, but this workload does not query the `departments` table. This should appear as unused after results are generated.
 
 2. Connect as `app_write`, and then query, insert, and update employee data.
 
@@ -241,41 +239,26 @@ This lab assumes you have:
     </copy>
     ```
 
-3. Connect as `app_admin`, and then query employee data, delete one employee row, and query departments.
-
-    ```
-    <copy>
-    SELECT * FROM hr_owner.employees;
-
-    DELETE FROM hr_owner.employees
-    WHERE id = 3;
-
-    SELECT * FROM hr_owner.departments;
-
-    COMMIT;
-    </copy>
-    ```
-
-4. Connect as `pa_admin`, and then disable the capture.
+3. Connect as `pa_admin`, and then disable the capture.
 
     ```
     <copy>
     BEGIN
        DBMS_PRIVILEGE_CAPTURE.DISABLE_CAPTURE(
-          name => 'All Database Capture'
+          name => 'Application User Capture'
        );
     END;
     /
     </copy>
     ```
 
-5. Verify that the capture is disabled.
+4. Verify that the capture is disabled.
 
     ```
     <copy>
     SELECT name, type, enabled
     FROM dba_priv_captures
-    WHERE name = 'All Database Capture';
+    WHERE name = 'Application User Capture';
     </copy>
     ```
 
@@ -295,7 +278,7 @@ This lab assumes you have:
     <copy>
     BEGIN
        DBMS_PRIVILEGE_CAPTURE.GENERATE_RESULT(
-          name => 'All Database Capture'
+          name => 'Application User Capture'
        );
     END;
     /
@@ -351,28 +334,6 @@ This lab assumes you have:
     </copy>
     ```
 
-5. Review used and unused object privileges for `app_admin`.
-
-    ```
-    <copy>
-    -- Object privileges used by app_admin.
-    SELECT DISTINCT username, obj_priv, object_owner, object_name
-    FROM dba_used_objprivs
-    WHERE username = 'APP_ADMIN'
-      AND object_owner = 'HR_OWNER'
-      AND object_name IN ('EMPLOYEES', 'DEPARTMENTS')
-    ORDER BY object_name, obj_priv;
-
-    -- Object privileges granted to app_admin but not used.
-    SELECT DISTINCT username, obj_priv, object_owner, object_name
-    FROM dba_unused_objprivs
-    WHERE username = 'APP_ADMIN'
-      AND object_owner = 'HR_OWNER'
-      AND object_name IN ('EMPLOYEES', 'DEPARTMENTS')
-    ORDER BY object_name, obj_priv;
-    </copy>
-    ```
-
     **Note:**
 
     - You can see which object privileges were used and unused by each application user during the capture.
@@ -391,7 +352,7 @@ Once you have reviewed the results, drop the privilege capture and optionally re
     <copy>
     BEGIN
        DBMS_PRIVILEGE_CAPTURE.DROP_CAPTURE(
-          name => 'All Database Capture'
+          name => 'Application User Capture'
        );
     END;
     /
@@ -404,7 +365,6 @@ Once you have reviewed the results, drop the privilege capture and optionally re
     <copy>
     DROP USER app_read CASCADE;
     DROP USER app_write CASCADE;
-    DROP USER app_admin CASCADE;
     DROP USER pa_admin CASCADE;
     DROP USER hr_owner CASCADE;
     </copy>
